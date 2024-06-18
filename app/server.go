@@ -26,8 +26,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var b []byte
-	nRead, err := conn.Read(b)
+	buf := make([]byte, 1024)
+	nRead, err := conn.Read(buf)
 	if err != nil {
 		fmt.Println("Error reading the request: ", err.Error())
 		os.Exit(1)
@@ -44,7 +44,7 @@ func main() {
 	var start int
 	var end int
 	for i != nRead {
-		if b[i] == ' ' {
+		if buf[i] == ' ' {
 			if start == 0 {
 				start = i
 			} else {
@@ -55,7 +55,7 @@ func main() {
 		i++
 	}
 
-	url := b[start:end]
+	url := buf[start:end]
 	if len(url) == 1 {
 		conn.Write([]byte(empty200))
 	} else {
