@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 )
@@ -55,10 +56,12 @@ func main() {
 	}
 
 	url := buf[start:end]
-	fmt.Printf("%s\n", string(buf))
+	log.Printf("%s\n", string(url))
+
 	if string(url) == "/" {
 		conn.Write([]byte(empty200))
 	} else {
+		log.Printf("%s\n", string(url))
 		conn.Write([]byte(empty404))
 	}
 
