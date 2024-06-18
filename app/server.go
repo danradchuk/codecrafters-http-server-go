@@ -46,7 +46,7 @@ func main() {
 	for i != nRead {
 		if buf[i] == ' ' {
 			if start == 0 {
-				start = i
+				start = i + 1
 			} else {
 				end = i
 				break
