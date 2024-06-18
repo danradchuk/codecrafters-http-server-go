@@ -35,6 +35,7 @@ func main() {
 
 	if nRead == 0 {
 		conn.Write([]byte(empty400))
+		println("empty body")
 		os.Exit(1)
 	}
 
