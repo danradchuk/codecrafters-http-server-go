@@ -35,7 +35,6 @@ func main() {
 
 	if nRead == 0 {
 		conn.Write([]byte(empty400))
-		println("empty body")
 		os.Exit(1)
 	}
 
@@ -56,7 +55,8 @@ func main() {
 	}
 
 	url := buf[start:end]
-	if len(url) == 1 {
+	fmt.Printf("%s\n", string(buf))
+	if string(url) == "/" {
 		conn.Write([]byte(empty200))
 	} else {
 		conn.Write([]byte(empty404))
