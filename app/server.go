@@ -56,12 +56,10 @@ func main() {
 	}
 
 	url := buf[start:end]
-	log.Printf("%s\n", string(url))
-
+	log.Printf("len=%d, %s\n", len(url), string(url))
 	if string(url) == "/" {
 		conn.Write([]byte(empty200))
 	} else {
-		log.Printf("%s\n", string(url))
 		conn.Write([]byte(empty404))
 	}
 
