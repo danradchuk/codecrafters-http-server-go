@@ -10,8 +10,10 @@ import (
 )
 
 const empty200 = "HTTP/1.1 200 OK\r\n\r\n"
+const empty201 = "HTTP/1.1 201 Created\r\n\r\n"
 const empty400 = "HTTP/1.1 400 BAD REQUEST\r\n\r\n"
 const empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
+const empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -45,8 +47,8 @@ func handleConnection(conn net.Conn, directory string) {
 	defer conn.Close()
 
 	// read a request
-	buf := make([]byte, 1024)
-	nRead, err := conn.Read(buf)
+	req := make([]byte, 1024)
+	nRead, err := conn.Read(req)
 	if err != nil {
 		fmt.Printf("error reading the request: %s", err.Error())
 		os.Exit(1)
@@ -63,7 +65,7 @@ func handleConnection(conn net.Conn, directory string) {
 	var start int
 	var end int
 	for i != nRead {
-		if buf[i] == ' ' {
+		if req[i] == ' ' {
 			if start == 0 {
 				start = i + 1
 			} else {
@@ -75,7 +77,7 @@ func handleConnection(conn net.Conn, directory string) {
 	}
 
 	// simple router
-	url := string(buf[start:end])
+	url := string(req[start:end])
 	path := strings.Split(url, "/")
 	fmt.Printf("%v\n", path)
 
@@ -86,7 +88,7 @@ func handleConnection(conn net.Conn, directory string) {
 			os.Exit(1)
 		}
 	} else if path[1] == "echo" {
-		_, err := writeOK(conn, []byte(path[2]), "text/plain")
+		_, err := write2xx(conn, 200, []byte(path[2]), "text/plain")
 		if err != nil {
 			fmt.Printf("error writing the response to /echo: %s ", err.Error())
 			os.Exit(1)
@@ -95,7 +97,7 @@ func handleConnection(conn net.Conn, directory string) {
 		var i int
 		// skip request line
 		for i != nRead {
-			if buf[i] == '\r' {
+			if req[i] == '\r' {
 				i += 2 // skip \r\n up to Headers
 				break
 			}
@@ -105,7 +107,7 @@ func handleConnection(conn net.Conn, directory string) {
 		// extract headers
 		var j = i
 		for j != nRead {
-			if buf[j] == '\r' && buf[j+2] == '\r' {
+			if req[j] == '\r' && req[j+2] == '\r' {
 				j += 2
 				break
 			}
@@ -113,7 +115,7 @@ func handleConnection(conn net.Conn, directory string) {
 		}
 
 		var userAgent string
-		headers := strings.Split(string(buf[i:j]), "\r\n")
+		headers := strings.Split(string(req[i:j]), "\r\n")
 		for _, h := range headers {
 			if strings.HasPrefix(h, "User-Agent:") {
 				userAgent = strings.TrimSuffix(strings.TrimPrefix(h, "User-Agent: "), "\r\n")
@@ -121,23 +123,33 @@ func handleConnection(conn net.Conn, directory string) {
 			}
 		}
 
-		writeOK(conn, []byte(userAgent), "text/plain")
+		write2xx(conn, 200, []byte(userAgent), "text/plain")
 	} else if path[1] == "files" {
-		fileName := directory + "/" + path[2]
-		println(directory)
-		f, err := os.Open(fileName)
-		if err != nil {
-			conn.Write([]byte(empty404))
-			return
+		// parse method
+		var i int
+		for i != nRead {
+			if req[i] == ' ' {
+				break
+			}
+			i++
 		}
-		defer f.Close()
 
-		b, err := os.ReadFile(fileName)
-		if err != nil {
-			fmt.Printf("can't read the file %s. error: %s\n", fileName, err.Error())
-			os.Exit(1)
+		method := string(req[0:i])
+		if method == "GET" {
+			handleFileGet(conn, directory, path[2])
+		} else if method == "POST" {
+			var i int
+			for i != nRead {
+				if req[i] == '\r' && req[i+2] == '\r' {
+					i += 4
+					break
+				}
+				i++
+			}
+			handleFilePost(conn, directory, path[2], req[i:])
+		} else {
+			conn.Write([]byte(empty405))
 		}
-		writeOK(conn, b, "application/octet-stream")
 	} else {
 		_, err := conn.Write([]byte(empty404))
 		if err != nil {
@@ -153,10 +165,11 @@ func handleConnection(conn net.Conn, directory string) {
 	// }
 }
 
-func writeOK(w io.Writer, body []byte, contentType string) (int, error) {
+func write2xx(w io.Writer, status int, body []byte, contentType string) (int, error) {
 	var resp strings.Builder
 
-	resp.WriteString("HTTP/1.1 200 OK\r\n")
+	s := fmt.Sprintf("HTTP/1.1 %d OK\r\n", status)
+	resp.WriteString(s)
 
 	t := fmt.Sprintf("Content-Type: %s\r\n", contentType)
 	resp.WriteString(t)
@@ -167,4 +180,39 @@ func writeOK(w io.Writer, body []byte, contentType string) (int, error) {
 	resp.Write(body)
 
 	return w.Write([]byte(resp.String()))
+}
+
+func handleFileGet(conn net.Conn, directory string, fileName string) {
+	filePath := directory + "/" + fileName
+	println(directory)
+	f, err := os.Open(filePath)
+	if err != nil {
+		conn.Write([]byte(empty404))
+		return
+	}
+	defer f.Close()
+
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("can't read the file %s. error: %s\n", filePath, err.Error())
+		os.Exit(1)
+	}
+	write2xx(conn, 200, b, "application/octet-stream")
+}
+
+func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) {
+	filePath := directory + "/" + fileName
+	f, err := os.Create(filePath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	nWritten, err := f.Write(content)
+	if err != nil {
+		return
+	}
+	println(nWritten)
+
+	conn.Write([]byte(empty201))
 }
