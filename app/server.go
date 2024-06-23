@@ -120,6 +120,7 @@ func handleConnection(conn net.Conn) {
 		writeOK(conn, []byte(userAgent), "text/plain")
 	} else if path[1] == "files" {
 		fileName := path[2]
+		println(fileName)
 		f, err := os.Open(fileName)
 		if err != nil {
 			conn.Write([]byte(empty404))
