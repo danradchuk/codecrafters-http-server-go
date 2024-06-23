@@ -63,6 +63,7 @@ func main() {
 	// simple router
 	url := string(buf[start:end])
 	path := strings.Split(url, "/")
+	fmt.Printf("%v\n", path)
 
 	if url == "/" {
 		_, err := conn.Write([]byte(empty200))
