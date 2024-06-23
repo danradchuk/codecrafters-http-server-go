@@ -92,7 +92,7 @@ func handleConnection(conn net.Conn, directory string) {
 		var encoding string
 		for _, e := range encodings {
 			fmt.Printf("encoding: %s\n", e)
-			if e == "gzip" {
+			if strings.TrimSpace(e) == "gzip" {
 				encoding = e
 				break
 			}
