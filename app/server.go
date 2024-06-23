@@ -77,7 +77,7 @@ func main() {
 			fmt.Printf("error writing the response to /echo: %s ", err.Error())
 			os.Exit(1)
 		}
-	} else if path[1] == "user-agents" {
+	} else if path[1] == "user-agent" {
 		var i int
 		// skip request line
 		for i != nRead {
