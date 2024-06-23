@@ -82,7 +82,7 @@ func handleConnection(conn net.Conn) {
 			os.Exit(1)
 		}
 	} else if path[1] == "echo" {
-		_, err := writeOK(conn, []byte(path[2]))
+		_, err := writeOK(conn, []byte(path[2]), "text/plain")
 		if err != nil {
 			fmt.Printf("error writing the response to /echo: %s ", err.Error())
 			os.Exit(1)
@@ -117,7 +117,22 @@ func handleConnection(conn net.Conn) {
 			}
 		}
 
-		writeOK(conn, []byte(userAgent))
+		writeOK(conn, []byte(userAgent), "text/plain")
+	} else if path[1] == "files" {
+		fileName := path[2]
+		f, err := os.Open(fileName)
+		if err != nil {
+			conn.Write([]byte(empty404))
+			return
+		}
+		defer f.Close()
+
+		b, err := os.ReadFile(fileName)
+		if err != nil {
+			fmt.Printf("can't read the file %s. error: %s\n", fileName, err.Error())
+			os.Exit(1)
+		}
+		writeOK(conn, b, "application/octet-stream")
 	} else {
 		_, err := conn.Write([]byte(empty404))
 		if err != nil {
@@ -133,13 +148,13 @@ func handleConnection(conn net.Conn) {
 	// }
 }
 
-func writeOK(w io.Writer, body []byte) (int, error) {
+func writeOK(w io.Writer, body []byte, contentType string) (int, error) {
 	var resp strings.Builder
 
 	resp.WriteString("HTTP/1.1 200 OK\r\n")
 
-	contentType := "Content-Type: text/plain\r\n"
-	resp.WriteString(contentType)
+	t := fmt.Sprintf("Content-Type: %s\r\n", contentType)
+	resp.WriteString(t)
 
 	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
 	resp.WriteString(contentLength)
