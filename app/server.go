@@ -91,13 +91,13 @@ func handleConnection(conn net.Conn, directory string) {
 
 		var encoding string
 		for _, e := range encodings {
+			fmt.Printf("encoding: %s\n", e)
 			if e == "gzip" {
 				encoding = e
 				break
 			}
 		}
 
-		fmt.Printf("encoding: %s\n", encoding)
 		if encoding != "gzip" {
 			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", false, "")
 			if err != nil {
