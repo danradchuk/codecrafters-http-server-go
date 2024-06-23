@@ -90,9 +90,8 @@ func main() {
 
 		// extract headers
 		var j = i
-		b := buf[i:nRead]
 		for j != nRead {
-			if b[j] == '\r' && b[j+2] == '\r' {
+			if buf[j] == '\r' && buf[j+2] == '\r' {
 				j += 2
 				break
 			}
@@ -103,7 +102,7 @@ func main() {
 		headers := strings.Split(string(buf[i:j]), "\r\n")
 		for _, h := range headers {
 			if strings.HasPrefix(h, "User-Agent:") {
-				userAgent = strings.TrimSuffix(strings.TrimPrefix(h, "User-Agent:"), "\r\n")
+				userAgent = strings.TrimSuffix(strings.TrimPrefix(h, "User-Agent: "), "\r\n")
 				break
 			}
 		}
