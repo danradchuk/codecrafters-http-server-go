@@ -76,6 +76,38 @@ func main() {
 			fmt.Printf("error writing the response to /echo: %s ", err.Error())
 			os.Exit(1)
 		}
+	} else if path[1] == "user-agents" {
+		var i int
+		// skip request line
+		for i != nRead {
+			if buf[i] == '\r' {
+				i += 2 // skip \r\n up to Headers
+				break
+			}
+			i++
+		}
+
+		// extract headers
+		var j = i
+		b := buf[i:nRead]
+		for j != nRead {
+			if b[j] == '\r' && b[j+2] == '\r' {
+				j += 2
+				break
+			}
+			j++
+		}
+
+		var userAgent string
+		headers := strings.Split(string(buf[i:j]), "\r\n")
+		for _, h := range headers {
+			if strings.HasPrefix(h, "User-Agent:") {
+				userAgent = strings.TrimSuffix(strings.TrimPrefix(h, "User-Agent:"), "\r\n")
+				break
+			}
+		}
+
+		writeOK(conn, []byte(userAgent))
 	} else {
 		_, err := conn.Write([]byte(empty404))
 		if err != nil {
