@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
@@ -168,6 +170,10 @@ func write2xx(w io.Writer, status int, body []byte, contentType string, compress
 	if compressed {
 		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
 		resp.WriteString(e)
+		body, err := compress(body)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
@@ -247,4 +253,20 @@ func extractHeader(req []byte, nRead int, name string) string {
 	}
 
 	return header
+}
+
+func compress(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	_, err := w.Write(data)
+	if err != nil {
+		return nil, err
+	}
+
+	err = w.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
