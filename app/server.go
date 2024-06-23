@@ -123,9 +123,9 @@ func handleConnection(conn net.Conn, directory string) {
 
 		writeOK(conn, []byte(userAgent), "text/plain")
 	} else if path[1] == "files" {
-		fileName := path[2]
+		fileName := directory + "/" + path[2]
 		println(directory)
-		f, err := os.Open(directory + "/" + fileName)
+		f, err := os.Open(fileName)
 		if err != nil {
 			conn.Write([]byte(empty404))
 			return
