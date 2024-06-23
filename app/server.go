@@ -88,7 +88,6 @@ func handleConnection(conn net.Conn, directory string) {
 		}
 	} else if path[1] == "echo" {
 		encodings := strings.Split(extractHeader(req, nRead, "Accept-Encoding"), ",")
-		fmt.Printf("encodings: %v\n", encodings)
 
 		var encoding string
 		for _, e := range encodings {
@@ -98,6 +97,7 @@ func handleConnection(conn net.Conn, directory string) {
 			}
 		}
 
+		fmt.Printf("encoding: %s\n", encoding)
 		if encoding != "gzip" {
 			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", false, "")
 			if err != nil {
