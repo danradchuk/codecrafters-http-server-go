@@ -170,7 +170,8 @@ func write2xx(w io.Writer, status int, body []byte, contentType string, compress
 	if compressed {
 		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
 		resp.WriteString(e)
-		body, err := compress(body)
+		b, err := compress(body)
+		body = b
 		if err != nil {
 			return 0, err
 		}
