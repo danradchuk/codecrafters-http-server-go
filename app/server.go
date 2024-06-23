@@ -89,6 +89,7 @@ func handleConnection(conn net.Conn, directory string) {
 		}
 	} else if path[1] == "echo" {
 		encodings := strings.Split(extractHeader(req, nRead, "Accept-Encoding"), ",")
+		fmt.Printf("%v\n", encodings)
 
 		var encoding string
 		for _, e := range encodings {
