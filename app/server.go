@@ -94,35 +94,7 @@ func handleConnection(conn net.Conn, directory string) {
 			os.Exit(1)
 		}
 	} else if path[1] == "user-agent" {
-		var i int
-		// skip request line
-		for i != nRead {
-			if req[i] == '\r' {
-				i += 2 // skip \r\n up to Headers
-				break
-			}
-			i++
-		}
-
-		// extract headers
-		var j = i
-		for j != nRead {
-			if req[j] == '\r' && req[j+2] == '\r' {
-				j += 2
-				break
-			}
-			j++
-		}
-
-		var userAgent string
-		headers := strings.Split(string(req[i:j]), "\r\n")
-		for _, h := range headers {
-			if strings.HasPrefix(h, "User-Agent:") {
-				userAgent = strings.TrimSuffix(strings.TrimPrefix(h, "User-Agent: "), "\r\n")
-				break
-			}
-		}
-
+		var userAgent = extractHeader(req, nRead, "User-Agent")
 		write2xx(conn, 200, []byte(userAgent), "text/plain")
 	} else if path[1] == "files" {
 		// parse method
@@ -146,7 +118,7 @@ func handleConnection(conn net.Conn, directory string) {
 				}
 				i++
 			}
-			handleFilePost(conn, directory, path[2], req[i:])
+			handleFilePost(conn, directory, path[2], req[i:nRead])
 		} else {
 			conn.Write([]byte(empty405))
 		}
@@ -215,4 +187,40 @@ func handleFilePost(conn net.Conn, directory string, fileName string, content []
 	println(nWritten)
 
 	conn.Write([]byte(empty201))
+}
+
+func extractHeader(req []byte, nRead int, name string) string {
+
+	var i int
+	// skip request line
+	for i != nRead {
+		if req[i] == '\r' {
+			i += 2 // skip \r\n up to Headers
+			break
+		}
+		i++
+	}
+
+	// extract headers
+	var j = i
+	for j != nRead {
+		if req[j] == '\r' && req[j+2] == '\r' {
+			j += 2
+			break
+		}
+		j++
+	}
+
+	headers := strings.Split(string(req[i:j]), "\r\n")
+	prefix := fmt.Sprintf("%s: ", name)
+
+	var header string
+	for _, h := range headers {
+		if strings.HasPrefix(h, name) {
+			header = strings.TrimSuffix(strings.TrimPrefix(h, prefix), "\r\n")
+			break
+		}
+	}
+
+	return header
 }
