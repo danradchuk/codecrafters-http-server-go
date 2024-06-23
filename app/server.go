@@ -88,7 +88,16 @@ func handleConnection(conn net.Conn, directory string) {
 			os.Exit(1)
 		}
 	} else if path[1] == "echo" {
-		encoding := extractHeader(req, nRead, "Accept-Encoding")
+		encodings := strings.Split(extractHeader(req, nRead, "Accept-Encoding"), ",")
+
+		var encoding string
+		for _, e := range encodings {
+			if e == "gzip" {
+				encoding = e
+				break
+			}
+		}
+
 		if encoding != "gzip" {
 			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", false, "")
 			if err != nil {
