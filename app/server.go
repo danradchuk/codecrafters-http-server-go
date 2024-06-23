@@ -88,14 +88,23 @@ func handleConnection(conn net.Conn, directory string) {
 			os.Exit(1)
 		}
 	} else if path[1] == "echo" {
-		_, err := write2xx(conn, 200, []byte(path[2]), "text/plain")
-		if err != nil {
-			fmt.Printf("error writing the response to /echo: %s ", err.Error())
-			os.Exit(1)
+		encoding := extractHeader(req, nRead, "Accept-Encoding")
+		if encoding != "gzip" {
+			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", false, "")
+			if err != nil {
+				fmt.Printf("error writing the response to /echo: %s ", err.Error())
+				os.Exit(1)
+			}
+		} else {
+			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", true, encoding)
+			if err != nil {
+				fmt.Printf("error writing the response to /echo: %s ", err.Error())
+				os.Exit(1)
+			}
 		}
 	} else if path[1] == "user-agent" {
 		var userAgent = extractHeader(req, nRead, "User-Agent")
-		write2xx(conn, 200, []byte(userAgent), "text/plain")
+		write2xx(conn, 200, []byte(userAgent), "text/plain", false, "")
 	} else if path[1] == "files" {
 		// parse method
 		var i int
@@ -137,7 +146,7 @@ func handleConnection(conn net.Conn, directory string) {
 	// }
 }
 
-func write2xx(w io.Writer, status int, body []byte, contentType string) (int, error) {
+func write2xx(w io.Writer, status int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
 	var resp strings.Builder
 
 	s := fmt.Sprintf("HTTP/1.1 %d OK\r\n", status)
@@ -145,6 +154,11 @@ func write2xx(w io.Writer, status int, body []byte, contentType string) (int, er
 
 	t := fmt.Sprintf("Content-Type: %s\r\n", contentType)
 	resp.WriteString(t)
+
+	if compressed {
+		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
+		resp.WriteString(e)
+	}
 
 	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
 	resp.WriteString(contentLength)
@@ -169,7 +183,7 @@ func handleFileGet(conn net.Conn, directory string, fileName string) {
 		fmt.Printf("can't read the file %s. error: %s\n", filePath, err.Error())
 		os.Exit(1)
 	}
-	write2xx(conn, 200, b, "application/octet-stream")
+	write2xx(conn, 200, b, "application/octet-stream", false, "")
 }
 
 func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) {
