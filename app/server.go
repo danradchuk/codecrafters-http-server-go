@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"io"
 	"net"
 	"os"
+	"strings"
 )
 
 const empty200 = "HTTP/1.1 200 OK\r\n\r\n"
@@ -13,27 +14,31 @@ const empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+	fmt.Println("logs from your program will appear here!")
 
+	// listen
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
-		fmt.Println("Failed to bind to port 4221")
+		fmt.Println("failed to bind to port 4221")
 		os.Exit(1)
 	}
 
+	// accept
 	conn, err := l.Accept()
 	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
+		fmt.Printf("error accepting connection: %s", err.Error())
 		os.Exit(1)
 	}
 
+	// read a request
 	buf := make([]byte, 1024)
 	nRead, err := conn.Read(buf)
 	if err != nil {
-		fmt.Println("Error reading the request: ", err.Error())
+		fmt.Printf("error reading the request: %s", err.Error())
 		os.Exit(1)
 	}
 
+	// respond if the body is empty
 	if nRead == 0 {
 		conn.Write([]byte(empty400))
 		os.Exit(1)
@@ -55,12 +60,28 @@ func main() {
 		i++
 	}
 
-	url := buf[start:end]
-	log.Printf("len=%d, %s\n", len(url), string(url))
-	if string(url) == "/" {
-		conn.Write([]byte(empty200))
+	// simple router
+	url := string(buf[start:end])
+	path := strings.Split(url, "/")
+
+	if url == "/" {
+		_, err := conn.Write([]byte(empty200))
+		if err != nil {
+			fmt.Printf("error writing the response to /: %s", err.Error())
+			os.Exit(1)
+		}
+	} else if path[1] == "echo" {
+		_, err := writeOK(conn, []byte(path[2]))
+		if err != nil {
+			fmt.Printf("error writing the response to /echo: %s ", err.Error())
+			os.Exit(1)
+		}
 	} else {
-		conn.Write([]byte(empty404))
+		_, err := conn.Write([]byte(empty404))
+		if err != nil {
+			fmt.Printf("error: unknown path %s", err.Error())
+			os.Exit(1)
+		}
 	}
 
 	// nWrite, err := conn.Write([]byte(empty200))
@@ -68,4 +89,20 @@ func main() {
 	// 	fmt.Println("Error writing the response: ", err.Error())
 	// 	os.Exit(1)
 	// }
+}
+
+func writeOK(w io.Writer, body []byte) (int, error) {
+	var resp strings.Builder
+
+	resp.WriteString("HTTP/1.1 200 OK\r\n")
+
+	contentType := "Content-Type: text/plain\r\n"
+	resp.WriteString(contentType)
+
+	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
+	resp.WriteString(contentLength)
+
+	resp.Write(body)
+
+	return w.Write([]byte(resp.String()))
 }
