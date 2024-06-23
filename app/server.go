@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,9 @@ const empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("logs from your program will appear here!")
+
+	var directory = flag.String("directory", "default", "a string for directory flag")
+	flag.Parse()
 
 	// listen
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
@@ -32,12 +36,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		go handleConnection(conn)
+		go handleConnection(conn, *directory)
 	}
 
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, directory string) {
 	defer conn.Close()
 
 	// read a request
@@ -120,8 +124,7 @@ func handleConnection(conn net.Conn) {
 		writeOK(conn, []byte(userAgent), "text/plain")
 	} else if path[1] == "files" {
 		fileName := path[2]
-		println(fileName)
-		f, err := os.Open(fileName)
+		f, err := os.Open(directory + "/" + fileName)
 		if err != nil {
 			conn.Write([]byte(empty404))
 			return
