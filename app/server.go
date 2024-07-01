@@ -146,7 +146,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	}
 
 	// simple router
-	switch path[0] {
+	switch path[1] {
 	case "/":
 		_, err := conn.Write([]byte(Empty200))
 		if err != nil {
@@ -165,7 +165,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 			}
 		}
 
-		body := path[1]
+		body := path[2]
 		if encoding == "gzip" {
 			_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
 			if err != nil {
@@ -183,7 +183,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 		var userAgent = headers["User-Agent"]
 		writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
 	case "/file":
-		fileName := path[1]
+		fileName := path[2]
 
 		contentLength, err := strconv.Atoi(headers["Content-Length"])
 		if err != nil {
