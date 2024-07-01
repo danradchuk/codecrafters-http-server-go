@@ -220,6 +220,7 @@ func handleFileGet(conn net.Conn, directory string, fileName string) {
 	filePath := directory + "/" + fileName
 	f, err := os.Open(filePath)
 	if err != nil {
+		println(filePath)
 		conn.Write([]byte(Empty404))
 		return
 	}
@@ -227,6 +228,7 @@ func handleFileGet(conn net.Conn, directory string, fileName string) {
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
+		println(filePath)
 		conn.Write([]byte(Empty404))
 		return
 	}
