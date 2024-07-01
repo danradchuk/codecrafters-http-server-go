@@ -124,6 +124,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	statusLineParts := strings.Split(statusLine, " ")
 	method := statusLineParts[0]
 	path := strings.Split(statusLineParts[1], "/")
+	fmt.Printf("%v\n", path)
 
 	// extract headers
 	var headers = make(map[string]string)
