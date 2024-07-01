@@ -123,7 +123,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	// extract request line
 	statusLineParts := strings.Split(statusLine, " ")
 	method := statusLineParts[0]
-	path := statusLineParts[1]
+	path := strings.Split(statusLineParts[1], "/")
 
 	// extract headers
 	var headers = make(map[string]string)
@@ -145,7 +145,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	}
 
 	// simple router
-	switch path {
+	switch path[1] {
 	case "/":
 		_, err := conn.Write([]byte(Empty200))
 		if err != nil {
@@ -164,7 +164,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 			}
 		}
 
-		body := strings.Split(path, "/")[2]
+		body := path[2]
 		if encoding == "gzip" {
 			_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
 			if err != nil {
@@ -182,7 +182,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 		var userAgent = headers["User-Agent"]
 		writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
 	case "/file":
-		fileName := strings.Split(path, "/")[2]
+		fileName := path[2]
 
 		contentLength, err := strconv.Atoi(headers["Content-Length"])
 		if err != nil {
