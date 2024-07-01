@@ -1,21 +1,56 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
+	"time"
 )
 
-const empty200 = "HTTP/1.1 200 OK\r\n\r\n"
-const empty201 = "HTTP/1.1 201 Created\r\n\r\n"
-const empty400 = "HTTP/1.1 400 BAD REQUEST\r\n\r\n"
-const empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
-const empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
+const Empty200 = "HTTP/1.1 200 OK\r\n\r\n"
+const Empty201 = "HTTP/1.1 201 Created\r\n\r\n"
+const Empty400 = "HTTP/1.1 400 Bad Request\r\n\r\n"
+const Empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
+const Empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
+
+var statusCodeToStatusStr = map[int]string{
+	200: "OK",
+	201: "Created",
+	400: "Bad Request",
+	404: "Not Found",
+	405: "Method Not Allowed",
+}
+
+type errStringBuilder struct {
+	sb  strings.Builder
+	err error
+}
+
+func (esb *errStringBuilder) writeStr(s string) {
+	if esb.err != nil {
+		return
+	}
+
+	_, esb.err = esb.sb.WriteString(s)
+}
+
+func (esb *errStringBuilder) write(buf []byte) {
+	if esb.err != nil {
+		return
+	}
+
+	_, esb.err = esb.sb.Write(buf)
+}
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -24,183 +59,177 @@ func main() {
 	var directory = flag.String("directory", "default", "a string for directory flag")
 	flag.Parse()
 
-	// listen
-	l, err := net.Listen("tcp", "0.0.0.0:4221")
+	var listenConfig net.ListenConfig
+	l, err := listenConfig.Listen(context.Background(), "tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("failed to bind to port 4221")
 		os.Exit(1)
 	}
 	defer l.Close()
 
-	for {
-		// accept
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Printf("error accepting connection: %s", err.Error())
-			os.Exit(1)
-		}
+	var successCount = 0
+	var errChan = make(chan error)
+	var doneChan = make(chan string)
 
-		go handleConnection(conn, *directory)
-	}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	go func() {
+		for {
+			// accept
+			conn, err := l.Accept()
+			if err != nil {
+				fmt.Printf("error accepting connection: %s", err.Error())
+				continue
+			}
+
+			go handleConnection(conn, *directory, errChan, doneChan)
+
+			select {
+			case error := <-errChan:
+				fmt.Printf("error occured: %s\n", error)
+			case success := <-doneChan:
+				fmt.Printf("a request %d is processed %s \n", successCount, success)
+				successCount++
+			}
+		}
+	}()
+
+	<-sigCh
+	// graceful shutdown https://eli.thegreenplace.net/2020/graceful-shutdown-of-a-tcp-server-in-go/
+
+	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	<-ctx.Done()
+	log.Println("timeout of 5 seconds")
+
+	log.Println("service was shut down")
 
 }
 
-func handleConnection(conn net.Conn, directory string) {
+func handleConnection(conn net.Conn, directory string, errChan chan<- error, doneChan chan<- string) {
 	defer conn.Close()
 
-	// read a request
-	req := make([]byte, 1024)
-	nRead, err := conn.Read(req)
+	reader := bufio.NewReader(conn)
+
+	statusLine, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Printf("error reading the request: %s", err.Error())
-		os.Exit(1)
+		errChan <- err
+		return
 	}
 
-	// respond if the body is empty
-	if nRead == 0 {
-		conn.Write([]byte(empty400))
-		os.Exit(1)
-	}
+	// extract request line
+	statusLineParts := strings.Split(statusLine, " ")
+	method := statusLineParts[0]
+	path := statusLineParts[1]
 
-	// extract URL
-	var i int
-	var start int
-	var end int
-	for i != nRead {
-		if req[i] == ' ' {
-			if start == 0 {
-				start = i + 1
-			} else {
-				end = i
-				break
-			}
+	// extract headers
+	var headers = make(map[string]string)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			errChan <- err
+			return
 		}
-		i++
+
+		if line == "\r\n" {
+			break
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
 	}
 
 	// simple router
-	url := string(req[start:end])
-	path := strings.Split(url, "/")
-
-	if url == "/" {
-		_, err := conn.Write([]byte(empty200))
+	switch path {
+	case "/":
+		_, err := conn.Write([]byte(Empty200))
 		if err != nil {
-			fmt.Printf("error writing the response to /: %s", err.Error())
-			os.Exit(1)
+			errChan <- err
+			return
 		}
-	} else if path[1] == "echo" {
-		encodings := strings.Split(extractHeader(req, nRead, "Accept-Encoding"), ",")
+	case "/echo":
+		encodings := strings.Split(headers["Accept-Encoding"], ",")
 
 		var encoding string
 		for _, e := range encodings {
 			e := strings.TrimSpace(e)
-			fmt.Printf("encoding: %s\n", e)
 			if e == "gzip" {
 				encoding = e
 				break
 			}
 		}
 
-		if encoding != "gzip" {
-			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", false, "")
+		body := strings.Split(path, "/")[2]
+		if encoding == "gzip" {
+			_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
 			if err != nil {
-				fmt.Printf("error writing the response to /echo: %s ", err.Error())
-				os.Exit(1)
+				errChan <- err
+				return
 			}
 		} else {
-			_, err := write2xx(conn, 200, []byte(path[2]), "text/plain", true, encoding)
+			_, err := writeResponse(conn, 200, []byte(body), "text/plain", false, "")
 			if err != nil {
-				fmt.Printf("error writing the response to /echo: %s ", err.Error())
-				os.Exit(1)
+				errChan <- err
+				return
 			}
 		}
-	} else if path[1] == "user-agent" {
-		var userAgent = extractHeader(req, nRead, "User-Agent")
-		write2xx(conn, 200, []byte(userAgent), "text/plain", false, "")
-	} else if path[1] == "files" {
-		// parse method
-		var i int
-		for i != nRead {
-			if req[i] == ' ' {
-				break
-			}
-			i++
+	case "/user-agent":
+		var userAgent = headers["User-Agent"]
+		writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
+	case "/file":
+		fileName := strings.Split(path, "/")[2]
+
+		contentLength, err := strconv.Atoi(headers["Content-Length"])
+		if err != nil {
+			errChan <- err
+			return
 		}
 
-		method := string(req[0:i])
+		buf := make([]byte, contentLength)
+		_, err = io.ReadFull(reader, buf)
+		if err != nil {
+			errChan <- err
+			return
+		}
+
 		if method == "GET" {
-			handleFileGet(conn, directory, path[2])
+			handleFileGet(conn, directory, fileName)
 		} else if method == "POST" {
-			var i int
-			for i != nRead {
-				if req[i] == '\r' && req[i+2] == '\r' {
-					i += 4
-					break
-				}
-				i++
-			}
-			handleFilePost(conn, directory, path[2], req[i:nRead])
+			handleFilePost(conn, directory, fileName, buf)
 		} else {
-			conn.Write([]byte(empty405))
+			conn.Write([]byte(Empty405))
 		}
-	} else {
-		_, err := conn.Write([]byte(empty404))
+	default:
+		_, err := conn.Write([]byte(Empty404))
 		if err != nil {
-			fmt.Printf("error: unknown path %s", err.Error())
-			os.Exit(1)
+			errChan <- err
+			return
 		}
 	}
 
-	// nWrite, err := conn.Write([]byte(empty200))
-	// if err != nil {
-	// 	fmt.Println("Error writing the response: ", err.Error())
-	// 	os.Exit(1)
-	// }
-}
-
-func write2xx(w io.Writer, status int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
-	var resp strings.Builder
-
-	s := fmt.Sprintf("HTTP/1.1 %d OK\r\n", status)
-	resp.WriteString(s)
-
-	t := fmt.Sprintf("Content-Type: %s\r\n", contentType)
-	resp.WriteString(t)
-
-	if compressed {
-		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
-		resp.WriteString(e)
-		b, err := compress(body)
-		body = b
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
-	resp.WriteString(contentLength)
-
-	resp.Write(body)
-
-	return w.Write([]byte(resp.String()))
+	doneChan <- "success"
 }
 
 func handleFileGet(conn net.Conn, directory string, fileName string) {
 	filePath := directory + "/" + fileName
-	println(directory)
 	f, err := os.Open(filePath)
 	if err != nil {
-		conn.Write([]byte(empty404))
+		conn.Write([]byte(Empty404))
 		return
 	}
 	defer f.Close()
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Printf("can't read the file %s. error: %s\n", filePath, err.Error())
-		os.Exit(1)
+		conn.Write([]byte(Empty404))
+		return
 	}
-	write2xx(conn, 200, b, "application/octet-stream", false, "")
+	writeResponse(conn, 200, b, "application/octet-stream", false, "")
 }
 
 func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) {
@@ -211,53 +240,53 @@ func handleFilePost(conn net.Conn, directory string, fileName string, content []
 	}
 	defer f.Close()
 
-	nWritten, err := f.Write(content)
+	_, err = f.Write(content)
 	if err != nil {
 		return
 	}
-	println(nWritten)
 
-	conn.Write([]byte(empty201))
+	conn.Write([]byte(Empty201))
 }
 
-func extractHeader(req []byte, nRead int, name string) string {
+// func extractHeader(headers []string) string {
+// 	var header string
+// 	for _, h := range headers {
+// 	}
+//
+// 	return header
+// }
 
-	var i int
-	// skip request line
-	for i != nRead {
-		if req[i] == '\r' {
-			i += 2 // skip \r\n up to Headers
-			break
+func writeResponse(w io.Writer, statusCode int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
+	esb := &errStringBuilder{sb: strings.Builder{}}
+
+	s := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusCodeToStatusStr[statusCode])
+	esb.writeStr(s)
+
+	contentType = fmt.Sprintf("Content-Type: %s\r\n", contentType)
+	esb.writeStr(contentType)
+
+	if compressed {
+		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
+		esb.writeStr(e)
+
+		b, err := compress(body)
+		if err != nil {
+			return 0, err
 		}
-		i++
+		body = b
 	}
 
-	// extract headers
-	var j = i
-	for j != nRead {
-		if req[j] == '\r' && req[j+2] == '\r' {
-			j += 2
-			break
-		}
-		j++
-	}
+	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
+	esb.writeStr(contentLength)
 
-	headers := strings.Split(string(req[i:j]), "\r\n")
-	prefix := fmt.Sprintf("%s: ", name)
+	esb.write(body)
 
-	var header string
-	for _, h := range headers {
-		if strings.HasPrefix(h, name) {
-			header = strings.TrimSuffix(strings.TrimPrefix(h, prefix), "\r\n")
-			break
-		}
-	}
-
-	return header
+	return w.Write([]byte(esb.sb.String()))
 }
 
 func compress(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
+
 	w := gzip.NewWriter(&buf)
 	_, err := w.Write(data)
 	if err != nil {
