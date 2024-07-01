@@ -153,7 +153,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 			errChan <- err
 			return
 		}
-	case "/echo":
+	case "echo":
 		encodings := strings.Split(headers["Accept-Encoding"], ",")
 
 		var encoding string
@@ -179,10 +179,10 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 				return
 			}
 		}
-	case "/user-agent":
+	case "user-agent":
 		var userAgent = headers["User-Agent"]
 		writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
-	case "/file":
+	case "file":
 		fileName := path[2]
 
 		contentLength, err := strconv.Atoi(headers["Content-Length"])
