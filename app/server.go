@@ -100,7 +100,6 @@ func main() {
 	}()
 
 	<-sigCh
-	// graceful shutdown https://eli.thegreenplace.net/2020/graceful-shutdown-of-a-tcp-server-in-go/
 
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -151,81 +150,31 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 	// simple router
 	switch path[1] {
 	case "":
-		_, err := conn.Write([]byte(Empty200))
+		_, err := writeResponse(conn, 200, nil, "text/plain", false, "")
 		if err != nil {
 			errChan <- err
 			return
 		}
 	case "echo":
-		encodings := strings.Split(headers["Accept-Encoding"], ",")
-
-		var encoding string
-		for _, e := range encodings {
-			e := strings.TrimSpace(e)
-			if e == "gzip" {
-				encoding = e
-				break
-			}
-		}
-
-		body := path[2]
-		if encoding == "gzip" {
-			_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
-			if err != nil {
-				errChan <- err
-				return
-			}
-		} else {
-			_, err := writeResponse(conn, 200, []byte(body), "text/plain", false, "")
-			if err != nil {
-				errChan <- err
-				return
-			}
+		err := handleEcho(conn, headers, path)
+		if err != nil {
+			errChan <- err
+			return
 		}
 	case "user-agent":
-		var userAgent = headers["User-Agent"]
-		_, err := writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
+		_, err := writeResponse(conn, 200, []byte(headers["User-Agent"]), "text/plain", false, "")
 		if err != nil {
 			errChan <- err
 			return
 		}
 	case "files":
-		fileName := path[2]
-
-		if method == "GET" {
-			_, err := handleFileGet(conn, directory, fileName)
-			if err != nil {
-				errChan <- err
-				return
-			}
-		} else if method == "POST" {
-			contentLength, err := strconv.Atoi(headers["Content-Length"])
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			buf := make([]byte, contentLength)
-			_, err = io.ReadFull(reader, buf)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			_, err = handleFilePost(conn, directory, fileName, buf)
-			if err != nil {
-				errChan <- err
-				return
-			}
-		} else {
-			_, err := conn.Write([]byte(Empty405))
-			if err != nil {
-				errChan <- err
-				return
-			}
+		err := handleFileOps(conn, directory, path, method, headers, reader)
+		if err != nil {
+			errChan <- err
+			return
 		}
 	default:
-		_, err := conn.Write([]byte(Empty404))
+		_, err := writeResponse(conn, 404, nil, "text/plain", false, "")
 		if err != nil {
 			errChan <- err
 			return
@@ -233,6 +182,69 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 	}
 
 	doneChan <- "success"
+}
+
+func handleFileOps(conn net.Conn, directory string, path []string, method string, headers map[string]string, reader *bufio.Reader) error {
+	fileName := path[2]
+
+	switch method {
+	case "GET":
+		_, err := handleFileGet(conn, directory, fileName)
+		if err != nil {
+			return err
+		}
+	case "POST":
+		contentLength, err := strconv.Atoi(headers["Content-Length"])
+		if err != nil {
+			return err
+		}
+
+		buf := make([]byte, contentLength)
+		_, err = io.ReadFull(reader, buf)
+		if err != nil {
+			return err
+		}
+
+		_, err = handleFilePost(conn, directory, fileName, buf)
+		if err != nil {
+			return err
+		}
+	default:
+		_, err := conn.Write([]byte(Empty405))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func handleEcho(conn net.Conn, headers map[string]string, path []string) error {
+	encodings := strings.Split(headers["Accept-Encoding"], ",")
+
+	var encoding string
+	for _, e := range encodings {
+		e := strings.TrimSpace(e)
+		if e == "gzip" {
+			encoding = e
+			break
+		}
+	}
+
+	body := path[2]
+	if encoding == "gzip" {
+		_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
+		if err != nil {
+			return err
+		}
+	} else {
+		_, err := writeResponse(conn, 200, []byte(body), "text/plain", false, "")
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func handleFileGet(conn net.Conn, directory string, fileName string) (int, error) {
@@ -281,8 +293,10 @@ func writeResponse(w io.Writer, statusCode int, body []byte, contentType string,
 	s := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusCodeToStatusStr[statusCode])
 	esb.writeStr(s)
 
-	contentType = fmt.Sprintf("Content-Type: %s\r\n", contentType)
-	esb.writeStr(contentType)
+	if contentType != "" {
+		contentType = fmt.Sprintf("Content-Type: %s\r\n", contentType)
+		esb.writeStr(contentType)
+	}
 
 	if compressed {
 		e := fmt.Sprintf("Content-Encoding: %s\r\n", encoding)
@@ -295,10 +309,11 @@ func writeResponse(w io.Writer, statusCode int, body []byte, contentType string,
 		body = b
 	}
 
-	contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
-	esb.writeStr(contentLength)
-
-	esb.write(body)
+	if body != nil {
+		contentLength := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
+		esb.writeStr(contentLength)
+		esb.write(body)
+	}
 
 	return w.Write([]byte(esb.sb.String()))
 }
