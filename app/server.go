@@ -76,6 +76,18 @@ func main() {
 
 	go func() {
 		for {
+			select {
+			case err := <-errChan:
+				fmt.Printf("error occured: %s\n", err)
+			case success := <-doneChan:
+				fmt.Printf("a request %d is processed %s \n", successCount, success)
+				successCount++
+			}
+		}
+	}()
+
+	go func() {
+		for {
 			// accept
 			conn, err := l.Accept()
 			if err != nil {
@@ -83,15 +95,7 @@ func main() {
 				continue
 			}
 
-			go handleConnection(conn, *directory, errChan, doneChan)
-
-			select {
-			case error := <-errChan:
-				fmt.Printf("error occured: %s\n", error)
-			case success := <-doneChan:
-				fmt.Printf("a request %d is processed %s \n", successCount, success)
-				successCount++
-			}
+			go handleConn(conn, *directory, errChan, doneChan)
 		}
 	}()
 
@@ -109,7 +113,7 @@ func main() {
 
 }
 
-func handleConnection(conn net.Conn, directory string, errChan chan<- error, doneChan chan<- string) {
+func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan chan<- string) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
