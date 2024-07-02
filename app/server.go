@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,7 +56,7 @@ func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("logs from your program will appear here!")
 
-	var directory = flag.String("directory", "default", "a string for directory flag")
+	var directory = flag.String("directory", ".", "a string for directory flag")
 	flag.Parse()
 
 	var listenConfig net.ListenConfig
@@ -185,29 +185,18 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	case "files":
 		fileName := path[2]
 
-		// contentLength, err := strconv.Atoi(headers["Content-Length"])
-		// if err != nil {
-		// 	errChan <- err
-		// 	return
-		// }
-
-		buf := make([]byte, 1024)
-		nRead, err := reader.Read(buf)
+		contentLength, err := strconv.Atoi(headers["Content-Length"])
 		if err != nil {
 			errChan <- err
 			return
 		}
 
-		for nRead != 0 {
-			nRead, err = reader.Read(buf)
-			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					errChan <- err
-					return
-				}
-			}
+		buf := make([]byte, contentLength)
+		_, err = io.ReadFull(reader, buf)
+		if err != nil {
+			errChan <- err
+			return
 		}
-		fmt.Printf("%v\n", buf)
 
 		if method == "GET" {
 			handleFileGet(conn, directory, fileName)
