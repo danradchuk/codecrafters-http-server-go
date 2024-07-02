@@ -204,6 +204,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 				return
 			}
 		}
+		fmt.Printf("%v\n", buf)
 
 		if method == "GET" {
 			handleFileGet(conn, directory, fileName)
