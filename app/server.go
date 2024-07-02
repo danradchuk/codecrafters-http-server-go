@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -14,7 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 )
 
 // Shortcuts
@@ -33,6 +32,56 @@ var statusCodeToStatusStr = map[int]string{
 	400: "Bad Request",
 	404: "Not Found",
 	405: "Method Not Allowed",
+}
+
+type Server struct {
+	listener net.Listener
+	quit     chan interface{}
+	wg       sync.WaitGroup
+}
+
+func NewServer(addr string, directory string, transferErrChan chan<- error, doneChan chan<- string) *Server {
+	s := &Server{
+		quit: make(chan interface{}),
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	s.listener = l
+	s.wg.Add(1)
+
+	go s.serve(directory, transferErrChan, doneChan)
+
+	return s
+}
+
+func (s *Server) serve(directory string, transferErrChan chan<- error, doneChan chan<- string) {
+	defer s.wg.Done()
+
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			select {
+			case <-s.quit:
+				return
+			default:
+				log.Println("accept error", err)
+			}
+		} else {
+			s.wg.Add(1)
+			go func() {
+				handleConnection(conn, directory, transferErrChan, doneChan)
+				s.wg.Done()
+			}()
+		}
+	}
+}
+
+func (s *Server) Stop() {
+	close(s.quit)
+	s.listener.Close()
+	s.wg.Wait()
 }
 
 type response struct {
@@ -65,18 +114,10 @@ func (esb *errStringBuilder) write(buf []byte) {
 }
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("logs from your program will appear here!")
 
 	var directory = flag.String("directory", ".", "a string for directory flag")
 	flag.Parse()
-
-	var listenConfig net.ListenConfig
-	l, err := listenConfig.Listen(context.Background(), "tcp", "0.0.0.0:4221")
-	if err != nil {
-		log.Fatal("failed to bind to port 4221")
-	}
-	defer l.Close()
 
 	var successCount = 0
 	var transferErrChan = make(chan error)
@@ -97,32 +138,17 @@ func main() {
 		}
 	}()
 
-	go func() {
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				fmt.Printf("error accepting connection: %s", err.Error())
-				continue
-			}
-
-			go handleConn(conn, *directory, transferErrChan, doneChan)
-		}
-	}()
+	s := NewServer("0.0.0.0:4221", *directory, transferErrChan, doneChan)
 
 	<-sigCh
 
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	<-ctx.Done()
-	log.Println("timeout of 5 seconds")
+	s.Stop()
 
 	log.Println("service was shut down")
 
 }
 
-func handleConn(conn net.Conn, directory string, transferErrChan chan<- error, doneChan chan<- string) {
+func handleConnection(conn net.Conn, directory string, transferErrChan chan<- error, doneChan chan<- string) {
 	defer conn.Close()
 
 	//conn.SetReadDeadline(time.Second)
