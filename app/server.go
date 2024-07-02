@@ -309,13 +309,13 @@ func writeResponse(w io.Writer, statusCode int, body []byte, contentType string,
 		body = b
 	}
 
+	esb.writeStr("\r\n")
+
 	if body != nil {
 		contentLength := fmt.Sprintf("Content-Length: %d\r\n", len(body))
 		esb.writeStr(contentLength)
 		esb.write(body)
 	}
-
-	esb.writeStr("\r\n")
 
 	return w.Write([]byte(esb.sb.String()))
 }
