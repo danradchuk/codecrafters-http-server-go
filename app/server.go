@@ -17,12 +17,14 @@ import (
 	"time"
 )
 
+// Shortcuts
 const (
 	Empty200 = "HTTP/1.1 200 OK\r\n\r\n"
 	Empty201 = "HTTP/1.1 201 Created\r\n\r\n"
 	Empty400 = "HTTP/1.1 400 Bad Request\r\n\r\n"
 	Empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
 	Empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
+	Empty500 = "HTTP/1.1 405 Internal Server Error\r\n\r\n"
 )
 
 var statusCodeToStatusStr = map[int]string{
@@ -31,6 +33,14 @@ var statusCodeToStatusStr = map[int]string{
 	400: "Bad Request",
 	404: "Not Found",
 	405: "Method Not Allowed",
+}
+
+type response struct {
+	status      int
+	body        []byte
+	compressed  bool
+	encoding    string
+	contentType string
 }
 
 type errStringBuilder struct {
@@ -69,7 +79,7 @@ func main() {
 	defer l.Close()
 
 	var successCount = 0
-	var errChan = make(chan error)
+	var transferErrChan = make(chan error)
 	var doneChan = make(chan string)
 
 	sigCh := make(chan os.Signal, 1)
@@ -78,11 +88,11 @@ func main() {
 	go func() {
 		for {
 			select {
-			case err := <-errChan:
-				fmt.Printf("error occured: %s\n", err)
+			case err := <-transferErrChan:
+				fmt.Printf("an error has occured: %s\n", err)
 			case success := <-doneChan:
 				successCount++
-				fmt.Printf("a request %d is processed %s \n", successCount, success)
+				fmt.Printf("a request %d has processed %s \n", successCount, success)
 			}
 		}
 	}()
@@ -95,7 +105,7 @@ func main() {
 				continue
 			}
 
-			go handleConn(conn, *directory, errChan, doneChan)
+			go handleConn(conn, *directory, transferErrChan, doneChan)
 		}
 	}()
 
@@ -112,15 +122,21 @@ func main() {
 
 }
 
-func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan chan<- string) {
+func handleConn(conn net.Conn, directory string, transferErrChan chan<- error, doneChan chan<- string) {
 	defer conn.Close()
+
+	//conn.SetReadDeadline(time.Second)
 
 	reader := bufio.NewReader(conn)
 
-	// extract request line
+	// extract status line
 	statusLine, err := reader.ReadString('\n')
 	if err != nil {
-		errChan <- err
+		_, err := conn.Write([]byte(Empty400))
+		if err != nil {
+			transferErrChan <- err
+			return
+		}
 		return
 	}
 
@@ -133,7 +149,11 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			errChan <- err
+			_, err := conn.Write([]byte(Empty400))
+			if err != nil {
+				transferErrChan <- err
+				return
+			}
 			return
 		}
 
@@ -148,78 +168,30 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 	}
 
 	// simple router
+	var transferErr error
 	switch path[1] {
 	case "":
-		_, err := writeResponse(conn, 200, nil, "text/plain", false, "")
-		if err != nil {
-			errChan <- err
-			return
-		}
+		_, transferErr = writeResponse(conn, 200, nil, "text/plain", false, "")
 	case "echo":
-		err := handleEcho(conn, headers, path)
-		if err != nil {
-			errChan <- err
-			return
-		}
+		resp := handleEcho(headers, path)
+		_, transferErr = writeResponse(conn, resp.status, resp.body, resp.contentType, resp.compressed, resp.encoding)
 	case "user-agent":
-		_, err := writeResponse(conn, 200, []byte(headers["User-Agent"]), "text/plain", false, "")
-		if err != nil {
-			errChan <- err
-			return
-		}
+		_, transferErr = writeResponse(conn, 200, []byte(headers["User-Agent"]), "text/plain", false, "")
 	case "files":
-		err := handleFileOps(conn, directory, path, method, headers, reader)
-		if err != nil {
-			errChan <- err
-			return
-		}
+		resp := handleFileOps(directory, path, method, headers, reader)
+		_, transferErr = writeResponse(conn, resp.status, resp.body, resp.contentType, resp.compressed, resp.encoding)
 	default:
-		_, err := writeResponse(conn, 404, nil, "text/plain", false, "")
-		if err != nil {
-			errChan <- err
-			return
-		}
+		_, transferErr = writeResponse(conn, 404, nil, "text/plain", false, "")
 	}
 
-	doneChan <- "success"
-}
-
-func handleFileOps(conn net.Conn, directory string, path []string, method string, headers map[string]string, reader *bufio.Reader) error {
-	fileName := path[2]
-
-	switch method {
-	case "GET":
-		_, err := handleFileGet(conn, directory, fileName)
-		if err != nil {
-			return err
-		}
-	case "POST":
-		contentLength, err := strconv.Atoi(headers["Content-Length"])
-		if err != nil {
-			return err
-		}
-
-		buf := make([]byte, contentLength)
-		_, err = io.ReadFull(reader, buf)
-		if err != nil {
-			return err
-		}
-
-		_, err = handleFilePost(conn, directory, fileName, buf)
-		if err != nil {
-			return err
-		}
-	default:
-		_, err := conn.Write([]byte(Empty405))
-		if err != nil {
-			return err
-		}
+	if transferErr != nil {
+		transferErrChan <- transferErr
+	} else {
+		doneChan <- "success"
 	}
-
-	return nil
 }
 
-func handleEcho(conn net.Conn, headers map[string]string, path []string) error {
+func handleEcho(headers map[string]string, path []string) *response {
 	encodings := strings.Split(headers["Accept-Encoding"], ",")
 
 	var encoding string
@@ -233,58 +205,87 @@ func handleEcho(conn net.Conn, headers map[string]string, path []string) error {
 
 	body := path[2]
 	if encoding == "gzip" {
-		_, err := writeResponse(conn, 200, []byte(body), "text/plain", true, encoding)
-		if err != nil {
-			return err
+		return &response{
+			status:      200,
+			body:        []byte(body),
+			compressed:  true,
+			encoding:    encoding,
+			contentType: "text/plain",
 		}
 	} else {
-		_, err := writeResponse(conn, 200, []byte(body), "text/plain", false, "")
-		if err != nil {
-			return err
+		return &response{
+			status:      200,
+			body:        []byte(body),
+			contentType: "text/plain",
 		}
 	}
-
-	return nil
 }
 
-func handleFileGet(conn net.Conn, directory string, fileName string) (int, error) {
+func handleFileOps(directory string, path []string, method string, headers map[string]string, reader *bufio.Reader) *response {
+	fileName := path[2]
+
+	if method == "GET" {
+		return handleFileGet(directory, fileName)
+	} else if method == "POST" {
+		contentLength, err := strconv.Atoi(headers["Content-Length"])
+		if err != nil {
+			return &response{status: 400}
+		}
+
+		buf := make([]byte, contentLength)
+		_, err = io.ReadFull(reader, buf)
+		if err != nil {
+			return &response{status: 500}
+		}
+
+		return handleFilePost(directory, fileName, buf)
+	}
+
+	return &response{status: 405}
+}
+func handleFileGet(directory string, fileName string) *response {
 	filePath := directory + "/" + fileName
 	f, err := os.Open(filePath)
 	if err != nil {
-		return conn.Write([]byte(Empty404))
+		return &response{
+			status: 404,
+		}
 	}
 	defer f.Close()
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		return conn.Write([]byte(Empty404))
+		return &response{
+			status: 404,
+		}
 	}
 
-	return writeResponse(conn, 200, b, "application/octet-stream", false, "")
+	return &response{
+		status:      200,
+		body:        b,
+		contentType: "application/octet-stream",
+	}
 }
-
-func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) (int, error) {
+func handleFilePost(directory string, fileName string, content []byte) *response {
 	filePath := directory + "/" + fileName
 	f, err := os.Create(filePath)
 	if err != nil {
-		return 0, err
+		return &response{
+			status: 404,
+		}
 	}
 	defer f.Close()
 
 	_, err = f.Write(content)
 	if err != nil {
-		return 0, err
+		return &response{
+			status: 500,
+		}
 	}
 
-	return conn.Write([]byte(Empty201))
-}
-
-func extractHeader(headers map[string]string, header string) string {
-	if h, ok := headers[header]; ok {
-		return h
+	return &response{
+		status: 201,
 	}
-
-	return ""
 }
 
 func writeResponse(w io.Writer, statusCode int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
@@ -319,7 +320,6 @@ func writeResponse(w io.Writer, statusCode int, body []byte, contentType string,
 
 	return w.Write([]byte(esb.sb.String()))
 }
-
 func compress(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
 
