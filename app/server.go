@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -200,8 +201,10 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 		for nRead != 0 {
 			nRead, err = reader.Read(buf)
 			if err != nil {
-				errChan <- err
-				return
+				if !errors.Is(err, io.EOF) {
+					errChan <- err
+					return
+				}
 			}
 		}
 		fmt.Printf("%v\n", buf)
