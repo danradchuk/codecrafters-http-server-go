@@ -17,11 +17,13 @@ import (
 	"time"
 )
 
-const Empty200 = "HTTP/1.1 200 OK\r\n\r\n"
-const Empty201 = "HTTP/1.1 201 Created\r\n\r\n"
-const Empty400 = "HTTP/1.1 400 Bad Request\r\n\r\n"
-const Empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
-const Empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
+const (
+	Empty200 = "HTTP/1.1 200 OK\r\n\r\n"
+	Empty201 = "HTTP/1.1 201 Created\r\n\r\n"
+	Empty400 = "HTTP/1.1 400 Bad Request\r\n\r\n"
+	Empty404 = "HTTP/1.1 404 Not Found\r\n\r\n"
+	Empty405 = "HTTP/1.1 405 Method Not Allowed\r\n\r\n"
+)
 
 var statusCodeToStatusStr = map[int]string{
 	200: "OK",
@@ -62,8 +64,7 @@ func main() {
 	var listenConfig net.ListenConfig
 	l, err := listenConfig.Listen(context.Background(), "tcp", "0.0.0.0:4221")
 	if err != nil {
-		fmt.Println("failed to bind to port 4221")
-		os.Exit(1)
+		log.Fatal("failed to bind to port 4221")
 	}
 	defer l.Close()
 
@@ -80,15 +81,14 @@ func main() {
 			case err := <-errChan:
 				fmt.Printf("error occured: %s\n", err)
 			case success := <-doneChan:
-				fmt.Printf("a request %d is processed %s \n", successCount, success)
 				successCount++
+				fmt.Printf("a request %d is processed %s \n", successCount, success)
 			}
 		}
 	}()
 
 	go func() {
 		for {
-			// accept
 			conn, err := l.Accept()
 			if err != nil {
 				fmt.Printf("error accepting connection: %s", err.Error())
@@ -118,17 +118,16 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 
 	reader := bufio.NewReader(conn)
 
+	// extract request line
 	statusLine, err := reader.ReadString('\n')
 	if err != nil {
 		errChan <- err
 		return
 	}
 
-	// extract request line
 	statusLineParts := strings.Split(statusLine, " ")
 	method := statusLineParts[0]
 	path := strings.Split(statusLineParts[1], "/")
-	fmt.Printf("%v\n", path)
 
 	// extract headers
 	var headers = make(map[string]string)
@@ -190,7 +189,11 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 		fileName := path[2]
 
 		if method == "GET" {
-			handleFileGet(conn, directory, fileName)
+			_, err := handleFileGet(conn, directory, fileName)
+			if err != nil {
+				errChan <- err
+				return
+			}
 		} else if method == "POST" {
 			contentLength, err := strconv.Atoi(headers["Content-Length"])
 			if err != nil {
@@ -204,7 +207,12 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 				errChan <- err
 				return
 			}
-			handleFilePost(conn, directory, fileName, buf)
+
+			_, err = handleFilePost(conn, directory, fileName, buf)
+			if err != nil {
+				errChan <- err
+				return
+			}
 		} else {
 			conn.Write([]byte(Empty405))
 		}
@@ -219,37 +227,36 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 	doneChan <- "success"
 }
 
-func handleFileGet(conn net.Conn, directory string, fileName string) {
+func handleFileGet(conn net.Conn, directory string, fileName string) (int, error) {
 	filePath := directory + "/" + fileName
 	f, err := os.Open(filePath)
 	if err != nil {
-		conn.Write([]byte(Empty404))
-		return
+		return conn.Write([]byte(Empty404))
 	}
 	defer f.Close()
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		conn.Write([]byte(Empty404))
-		return
+		return conn.Write([]byte(Empty404))
 	}
-	writeResponse(conn, 200, b, "application/octet-stream", false, "")
+
+	return writeResponse(conn, 200, b, "application/octet-stream", false, "")
 }
 
-func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) {
+func handleFilePost(conn net.Conn, directory string, fileName string, content []byte) (int, error) {
 	filePath := directory + "/" + fileName
 	f, err := os.Create(filePath)
 	if err != nil {
-		return
+		return 0, err
 	}
 	defer f.Close()
 
 	_, err = f.Write(content)
 	if err != nil {
-		return
+		return 0, err
 	}
 
-	conn.Write([]byte(Empty201))
+	return conn.Write([]byte(Empty201))
 }
 
 // func extractHeader(headers []string) string {
