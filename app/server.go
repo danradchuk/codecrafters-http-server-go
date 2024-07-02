@@ -147,7 +147,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 
 	// simple router
 	switch path[1] {
-	case "/":
+	case "":
 		_, err := conn.Write([]byte(Empty200))
 		if err != nil {
 			errChan <- err
