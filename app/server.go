@@ -185,22 +185,21 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	case "files":
 		fileName := path[2]
 
-		contentLength, err := strconv.Atoi(headers["Content-Length"])
-		if err != nil {
-			errChan <- err
-			return
-		}
-
-		buf := make([]byte, contentLength)
-		_, err = io.ReadFull(reader, buf)
-		if err != nil {
-			errChan <- err
-			return
-		}
-
 		if method == "GET" {
 			handleFileGet(conn, directory, fileName)
 		} else if method == "POST" {
+			contentLength, err := strconv.Atoi(headers["Content-Length"])
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			buf := make([]byte, contentLength)
+			_, err = io.ReadFull(reader, buf)
+			if err != nil {
+				errChan <- err
+				return
+			}
 			handleFilePost(conn, directory, fileName, buf)
 		} else {
 			conn.Write([]byte(Empty405))
