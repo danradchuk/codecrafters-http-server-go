@@ -184,7 +184,11 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 		}
 	case "user-agent":
 		var userAgent = headers["User-Agent"]
-		writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
+		_, err := writeResponse(conn, 200, []byte(userAgent), "text/plain", false, "")
+		if err != nil {
+			errChan <- err
+			return
+		}
 	case "files":
 		fileName := path[2]
 
@@ -214,7 +218,11 @@ func handleConn(conn net.Conn, directory string, errChan chan<- error, doneChan 
 				return
 			}
 		} else {
-			conn.Write([]byte(Empty405))
+			_, err := conn.Write([]byte(Empty405))
+			if err != nil {
+				errChan <- err
+				return
+			}
 		}
 	default:
 		_, err := conn.Write([]byte(Empty404))
@@ -259,13 +267,13 @@ func handleFilePost(conn net.Conn, directory string, fileName string, content []
 	return conn.Write([]byte(Empty201))
 }
 
-// func extractHeader(headers []string) string {
-// 	var header string
-// 	for _, h := range headers {
-// 	}
-//
-// 	return header
-// }
+func extractHeader(headers map[string]string, header string) string {
+	if h, ok := headers[header]; ok {
+		return h
+	}
+
+	return ""
+}
 
 func writeResponse(w io.Writer, statusCode int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
 	esb := &errStringBuilder{sb: strings.Builder{}}
