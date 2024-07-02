@@ -12,7 +12,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -185,17 +184,25 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 	case "files":
 		fileName := path[2]
 
-		contentLength, err := strconv.Atoi(headers["Content-Length"])
+		// contentLength, err := strconv.Atoi(headers["Content-Length"])
+		// if err != nil {
+		// 	errChan <- err
+		// 	return
+		// }
+
+		buf := make([]byte, 0)
+		nRead, err := reader.Read(buf)
 		if err != nil {
 			errChan <- err
 			return
 		}
 
-		buf := make([]byte, contentLength)
-		_, err = io.ReadFull(reader, buf)
-		if err != nil {
-			errChan <- err
-			return
+		for nRead != 0 {
+			nRead, err = reader.Read(buf)
+			if err != nil {
+				errChan <- err
+				return
+			}
 		}
 
 		if method == "GET" {
