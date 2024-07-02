@@ -190,7 +190,7 @@ func handleConnection(conn net.Conn, directory string, errChan chan<- error, don
 		// 	return
 		// }
 
-		buf := make([]byte, 0)
+		buf := make([]byte, 1024)
 		nRead, err := reader.Read(buf)
 		if err != nil {
 			errChan <- err
