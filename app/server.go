@@ -79,9 +79,11 @@ func (s *Server) serve(directory string, transferErrChan chan<- error, doneChan 
 }
 
 func (s *Server) Stop() {
+	log.Println("service is shutting down")
 	close(s.quit)
 	s.listener.Close()
 	s.wg.Wait()
+	log.Println("service was shut down")
 }
 
 type response struct {
@@ -133,19 +135,14 @@ func main() {
 				fmt.Printf("an error has occured: %s\n", err)
 			case success := <-doneChan:
 				successCount++
-				fmt.Printf("a request %d has processed %s \n", successCount, success)
+				fmt.Printf("request № %d has processed %s \n", successCount, success)
 			}
 		}
 	}()
 
 	s := NewServer("0.0.0.0:4221", *directory, transferErrChan, doneChan)
-
 	<-sigCh
-
 	s.Stop()
-
-	log.Println("service was shut down")
-
 }
 
 func handleConnection(conn net.Conn, directory string, transferErrChan chan<- error, doneChan chan<- string) {
