@@ -16,7 +16,6 @@ import (
 	"sync"
 )
 
-// Shortcuts
 const (
 	Empty200 = "HTTP/1.1 200 OK\r\n\r\n"
 	Empty201 = "HTTP/1.1 201 Created\r\n\r\n"
@@ -34,14 +33,14 @@ var statusCodeToStatusStr = map[int]string{
 	405: "Method Not Allowed",
 }
 
-type Server struct {
+type server struct {
 	listener net.Listener
 	quit     chan interface{}
 	wg       sync.WaitGroup
 }
 
-func NewServer(addr string, directory string, transferErrChan chan<- error, doneChan chan<- string) *Server {
-	s := &Server{
+func newServer(addr string, directory string, transferErrChan chan<- error, doneChan chan<- string) *server {
+	s := &server{
 		quit: make(chan interface{}),
 	}
 	l, err := net.Listen("tcp", addr)
@@ -55,8 +54,7 @@ func NewServer(addr string, directory string, transferErrChan chan<- error, done
 
 	return s
 }
-
-func (s *Server) serve(directory string, transferErrChan chan<- error, doneChan chan<- string) {
+func (s *server) serve(directory string, transferErrChan chan<- error, doneChan chan<- string) {
 	defer s.wg.Done()
 
 	for {
@@ -77,8 +75,7 @@ func (s *Server) serve(directory string, transferErrChan chan<- error, doneChan 
 		}
 	}
 }
-
-func (s *Server) Stop() {
+func (s *server) stop() {
 	log.Println("service is shutting down")
 	close(s.quit)
 	s.listener.Close()
@@ -92,27 +89,6 @@ type response struct {
 	compressed  bool
 	encoding    string
 	contentType string
-}
-
-type errStringBuilder struct {
-	sb  strings.Builder
-	err error
-}
-
-func (esb *errStringBuilder) writeStr(s string) {
-	if esb.err != nil {
-		return
-	}
-
-	_, esb.err = esb.sb.WriteString(s)
-}
-
-func (esb *errStringBuilder) write(buf []byte) {
-	if esb.err != nil {
-		return
-	}
-
-	_, esb.err = esb.sb.Write(buf)
 }
 
 func main() {
@@ -140,15 +116,13 @@ func main() {
 		}
 	}()
 
-	s := NewServer("0.0.0.0:4221", *directory, transferErrChan, doneChan)
+	s := newServer("0.0.0.0:4221", *directory, transferErrChan, doneChan)
 	<-sigCh
-	s.Stop()
+	s.stop()
 }
 
 func handleConnection(conn net.Conn, directory string, transferErrChan chan<- error, doneChan chan<- string) {
 	defer conn.Close()
-
-	//conn.SetReadDeadline(time.Second)
 
 	reader := bufio.NewReader(conn)
 
@@ -247,6 +221,7 @@ func handleEcho(headers map[string]string, path []string) *response {
 func handleFileOps(directory string, path []string, method string, headers map[string]string, reader *bufio.Reader) *response {
 	fileName := path[2]
 
+	// could be switch/case but it'll be non-exhaustive
 	if method == "GET" {
 		return handleFileGet(directory, fileName)
 	} else if method == "POST" {
@@ -270,17 +245,13 @@ func handleFileGet(directory string, fileName string) *response {
 	filePath := directory + "/" + fileName
 	f, err := os.Open(filePath)
 	if err != nil {
-		return &response{
-			status: 404,
-		}
+		return &response{status: 404}
 	}
 	defer f.Close()
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		return &response{
-			status: 404,
-		}
+		return &response{status: 404}
 	}
 
 	return &response{
@@ -293,24 +264,37 @@ func handleFilePost(directory string, fileName string, content []byte) *response
 	filePath := directory + "/" + fileName
 	f, err := os.Create(filePath)
 	if err != nil {
-		return &response{
-			status: 404,
-		}
+		return &response{status: 404}
 	}
 	defer f.Close()
 
 	_, err = f.Write(content)
 	if err != nil {
-		return &response{
-			status: 500,
-		}
+		return &response{status: 500}
 	}
 
-	return &response{
-		status: 201,
-	}
+	return &response{status: 201}
 }
 
+type errStringBuilder struct {
+	sb  strings.Builder
+	err error
+}
+
+func (esb *errStringBuilder) writeStr(s string) {
+	if esb.err != nil {
+		return
+	}
+
+	_, esb.err = esb.sb.WriteString(s)
+}
+func (esb *errStringBuilder) write(buf []byte) {
+	if esb.err != nil {
+		return
+	}
+
+	_, esb.err = esb.sb.Write(buf)
+}
 func writeResponse(w io.Writer, statusCode int, body []byte, contentType string, compressed bool, encoding string) (int, error) {
 	esb := &errStringBuilder{sb: strings.Builder{}}
 
